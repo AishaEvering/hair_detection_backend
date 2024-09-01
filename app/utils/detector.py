@@ -7,8 +7,10 @@ from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
 from ultralytics.utils.plotting import Annotator
-from api.helpers.utils import get_class_names, load_model
+from .utils import get_class_names, load_model
+import logging
 
+logger = logging.getLogger(__name__)
 
 # Load the model
 model = load_model()
@@ -76,7 +78,7 @@ def add_video_detections(videoPath, file_id, delete_src=True):
             time.sleep(1)
 
     except Exception as e:
-        raise Exception(f"An error occurred:  {str(e)}")
+        logger.error(f"An error occurred: {e}")
     finally:
         cap.release()
         if os.path.exists(videoPath) and delete_src:
