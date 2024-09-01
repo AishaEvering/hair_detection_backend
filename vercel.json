@@ -1,4 +1,12 @@
 {
+  "builds": [
+    {
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "450mb"
+      }
+    }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]
