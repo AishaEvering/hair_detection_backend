@@ -1,3 +1,12 @@
+# Ignore local development files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.env
+.vscode/
+node_modules/
+
 *.log
 *.pyc
 
@@ -12,8 +21,8 @@ venv.bak/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
-api/__pycache__
-api/helpers/__pycache__/
+app/__pycache__
+app/helpers/__pycache__/
 *.py[cod]
 *$py.class
 
