@@ -36,6 +36,29 @@ def process_image():
         return "Error processing image", 500
 
 
+@bp.route("/api/process_example_image", methods=['GET', 'POST'])
+def process_example_image():
+
+    file_id = request.args.get('file_id')
+
+    if not file_id:
+        return jsonify({'error': 'No file_id provided'}), 400
+
+    file_path = os.path.join(current_app.config['EXAMPLE_IMG_DIR'], file_id)
+
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        image = Image.open(file_path)
+        img_io = img_detector(image, as_bytes=False)
+        return send_file(img_io, mimetype='image/jpeg')
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        logger.error(f"Error processing image: {str(e)}")
+        return "Error processing image", 500
+
+
 @bp.route('/api/process_frame', methods=['POST'])
 def process_frame():
     if 'frame' not in request.files:
@@ -91,6 +114,21 @@ def stream_frames():
         return jsonify({'error': 'File not found'}), 404
 
     return Response(add_video_detections(file_path, file_id=file_id), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@bp.route('/api/stream_example_frames', methods=['GET'])
+def stream_example_frames():
+    file_id = request.args.get('file_id')
+
+    if not file_id:
+        return jsonify({'error': 'No file_id provided'}), 400
+
+    file_path = os.path.join(current_app.config['EXAMPLE_VIDEO_DIR'], file_id)
+
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    return Response(add_video_detections(file_path, file_id=file_id, delete_src=False), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @bp.route('/api/stream_frames_progress', methods=['GET'])

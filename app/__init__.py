@@ -26,6 +26,8 @@ def create_app():
 
     app.config['YOLO_PATH'] = './app/models/best_quantized.onnx'
     app.config['TEMP_DIR'] = './app/tmp'
+    app.config['EXAMPLE_IMG_DIR'] = './app/static/image-examples'
+    app.config['EXAMPLE_VIDEO_DIR'] = './app/static/video-examples'
 
     with app.app_context():
         # Import routes
