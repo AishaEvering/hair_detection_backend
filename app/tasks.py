@@ -18,7 +18,13 @@ def clean_old_files(directory, age_in_seconds):
 def schedule_cleanup():
     # clean up runs every hour
     Timer(3600, schedule_cleanup).start()
-    clean_old_files(current_app.config['TEMP_DIR'], 3600)
+
+    temp_dir = current_app.config['TEMP_DIR']
+
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+
+    clean_old_files(temp_dir, 3600)
 
 
 def start_cleanup_task():
