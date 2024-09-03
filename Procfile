@@ -1,1 +1,5 @@
-web: gunicorn -b 0.0.0.0:$PORT wsgi:app
+web: gunicorn wsgi:app \
+   --workers 1 \
+   --worker-class uvicorn.workers.UvicornWorker \
+   --bind 0.0.0.0:$PORT \
+   --timeout 600
