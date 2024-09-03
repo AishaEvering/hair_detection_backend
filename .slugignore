@@ -1,8 +1,0 @@
-# Ignore local environment files and build artifacts
-
-_.pyc
-_.pyo
-**pycache**/
-.env
-node_modules/
-\*.log
