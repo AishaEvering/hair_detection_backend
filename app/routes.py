@@ -1,15 +1,18 @@
 import os
+import queue
+from tempfile import NamedTemporaryFile
 from PIL import Image
 import logging
 from dotenv import load_dotenv
 from flask import current_app, Blueprint, request, send_file, jsonify, Response
-from .utils.utils import save_to_temp
-from .utils.detector import img_detector, add_video_detections, progress_dict
+from .utils.detector import img_detector
 
 load_dotenv()
 
 bp = Blueprint('main', __name__)
 logger = logging.getLogger(__name__)
+
+MAX_WAIT_TIME = 10
 
 
 @bp.route("/")
@@ -54,7 +57,6 @@ def process_example_image():
         img_io = img_detector(image, as_bytes=False)
         return send_file(img_io, mimetype='image/jpeg')
     except Exception as e:
-        print(f"Error: {str(e)}")
         logger.error(f"Error processing image: {str(e)}")
         return "Error processing image", 500
 
@@ -78,6 +80,25 @@ def process_frame():
         return "Error processing frame", 500
 
 
+def save_to_temp(file) -> str:
+    temp = NamedTemporaryFile(
+        delete=False, suffix=".mp4", dir=current_app.config['TEMP_DIR'])
+
+    try:
+        contents = file.read()
+        with temp as f:
+            temp_file_name = f.name
+            f.write(contents)
+            f.flush()
+            os.fsync(f.fileno())
+        return temp_file_name
+    except Exception as e:
+        logger.error(f"Error uploading file: {str(e)}")
+        raise Exception("Error uploading the file.")
+    finally:
+        file.close()
+
+
 @bp.route('/api/upload_video', methods=['POST'])
 def upload_video():
     if 'video' not in request.files:
@@ -91,34 +112,74 @@ def upload_video():
     if file:
         try:
             tempFilePath = save_to_temp(file)
+
             if tempFilePath is None or not os.path.exists(tempFilePath):
                 logger.error(f"Temporary file not found after writing.")
                 return jsonify({"error": "Temporary file not found after writing."}), 500
 
-            return jsonify({'file_id': os.path.basename(tempFilePath)})
+            file_id = os.path.basename(tempFilePath)
+
+            backgroundThreadFactory = current_app.config['BACKGROUND_THREAD_FACTORY']
+            thread = backgroundThreadFactory.create(
+                thread_type="process_frames", file_path=tempFilePath, file_id=file_id)
+            thread.start()
+
+            return jsonify({'id': str(thread.thread_id)})
         except Exception as e:
             logger.error(f"Error uploading video: {str(e)}")
             return jsonify({"error": "Error uploading video"}), 500
 
 
+def generate_frames(thread, backgroundThreadFactory):
+    frame_queue = thread.get_frame_queue()
+
+    while True:
+        try:
+            frame_data = frame_queue.get(timeout=2)
+
+            if frame_data == "DONE":
+                backgroundThreadFactory.delete(thread.thread_id)
+                break
+            else:
+                yield frame_data
+        except queue.Empty:
+            print("No frame retrieved within the timeout period.")
+            continue
+
+
 @bp.route('/api/stream_frames', methods=['GET'])
-def stream_frames():
-    file_id = request.args.get('file_id')
+def stream_input_frames():
+    thread_id = request.args.get('id')
 
-    if not file_id:
-        return jsonify({'error': 'No file_id provided'}), 400
+    if not thread_id:
+        return jsonify({'error': 'No id provided'}), 400
 
-    file_path = os.path.join(current_app.config['TEMP_DIR'], file_id)
+    try:
+        backgroundThreadFactory = current_app.config['BACKGROUND_THREAD_FACTORY']
+        thread = backgroundThreadFactory.get_thread(thread_id)
 
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
+        if thread is None:
+            return jsonify({'error': 'Thread not found'}), 404
 
-    return Response(add_video_detections(file_path, file_id=file_id), mimetype='multipart/x-mixed-replace; boundary=frame')
+        file_path = thread.file_path
+
+        delect_src = False if thread.file_id.startswith('hair') else True
+
+        return Response(generate_frames(thread, backgroundThreadFactory), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if os.path.exists(file_path) and delect_src:
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.error(f"Failed to delete source video file: {e}")
 
 
-@bp.route('/api/stream_example_frames', methods=['GET'])
-def stream_example_frames():
-    file_id = request.args.get('file_id')
+@bp.route('/api/process_video_example', methods=['GET'])
+def process_video_example():
+    file_id = request.args.get('id')
 
     if not file_id:
         return jsonify({'error': 'No file_id provided'}), 400
@@ -128,14 +189,60 @@ def stream_example_frames():
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
 
-    return Response(add_video_detections(file_path, file_id=file_id, delete_src=False), mimetype='multipart/x-mixed-replace; boundary=frame')
+    try:
+        backgroundThreadFactory = current_app.config['BACKGROUND_THREAD_FACTORY']
+        thread = backgroundThreadFactory.create(
+            thread_type="process_frames", file_path=file_path, file_id=file_id)
+        thread.start()
+
+        return jsonify({'id': str(thread.thread_id)})
+    except Exception as e:
+        logger.error(f"Error uploading video: {str(e)}")
+        return jsonify({"error": "Error uploading video"}), 500
+
+
+@bp.route('/api/got_frames', methods=['GET'])
+def got_frames():
+    thread_id = request.args.get('id')
+
+    if not thread_id:
+        return jsonify({'error': 'No id provided'}), 400
+
+    got_frames = False
+
+    try:
+        backgroundThreadFactory = current_app.config['BACKGROUND_THREAD_FACTORY']
+        thread = backgroundThreadFactory.get_thread(thread_id)
+
+        if thread:
+            # Return whether frames exist in the queue
+            frame_queue = thread.get_frame_queue()
+            got_frames = frame_queue.qsize() > 0
+
+        else:
+            return jsonify({'error': 'Thread not found'}), 404
+
+        return jsonify({'got_frames': got_frames})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/stream_frames_progress', methods=['GET'])
 def get_progress():
-    file_id = request.args.get('file_id')
-    if not file_id:
-        return jsonify({'error': 'No file_id provided'}), 400
+    id = request.args.get('id')
 
-    progress = progress_dict.get(file_id, 0)
-    return jsonify({'progress': progress})
+    if not id:
+        return jsonify({'error': 'No id provided'}), 400
+
+    try:
+        backgroundThreadFactory = current_app.config['BACKGROUND_THREAD_FACTORY']
+        thread = backgroundThreadFactory.get_thread(id)
+
+        if thread:
+            return jsonify({'progress': thread.progress}), 200
+
+        return jsonify({'progress': 0}), 200
+    except Exception as e:
+        return jsonify({'progress': 0}), 200
+        # logger.error(f"Error fetching progress: {str(e)}")
+        # return jsonify({'error': 'Internal Server Error'}), 500

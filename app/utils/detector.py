@@ -2,22 +2,18 @@ import cv2
 import os
 import io
 import time
+from flask import current_app
 import numpy as np
 from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
 from ultralytics.utils.plotting import Annotator
-from .utils import get_class_names, load_model
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
-# Load the model
-model = load_model()
-
 load_dotenv()
-
-progress_dict = {}
 
 
 def img_detector(img, stream: bool = False, as_bytes: bool = True):
@@ -40,7 +36,7 @@ def img_detector(img, stream: bool = False, as_bytes: bool = True):
     return io.BytesIO(img_encoded.tobytes())
 
 
-def add_video_detections(videoPath, file_id, delete_src=True):
+def add_video_detections(videoPath, file_id):
     try:
         cap = cv2.VideoCapture(videoPath)
 
@@ -51,39 +47,47 @@ def add_video_detections(videoPath, file_id, delete_src=True):
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames == 0:
+            raise ValueError(f"Video file {videoPath} has no frames.")
+
         frame_count = 0
+        boundary = 'frame'
 
         while True:
             success, frame = cap.read()
+
             if success:
-                # process frame with the object detector
+                frame_count += 1
+
+                progress = int(
+                    (frame_count / total_frames) * 100)
+
                 processed_frame = __process_img(frame, stream=True)
-                processed_frame = cv2.resize(processed_frame, (width, height))
+                processed_frame = cv2.resize(
+                    processed_frame, (width, height))
 
                 # convert processed frame to JPEG
                 _, buffer = cv2.imencode('.jpg', processed_frame)
+                frame_bytes = buffer.tobytes()
 
-                frame_count += 1
-                progress_dict[file_id] = int(
-                    (frame_count / total_frames) * 100)
-
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                data = b'--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n%s\r\n' % (
+                    boundary.encode(), len(frame_bytes), frame_bytes)
+                yield data, progress
             else:
                 break
 
         # Ensure the progress reaches 100% after the loop
         if frame_count >= total_frames:
-            progress_dict[file_id] = 100
-            time.sleep(1)
+            progress = 100
+
+        data = b'--%s--\r\n' % boundary.encode()
+
+        yield data, progress
 
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"An error occurred during video processing: {e}")
     finally:
         cap.release()
-        if os.path.exists(videoPath) and delete_src:
-            os.remove(videoPath)
-        del progress_dict[file_id]
         cv2.destroyAllWindows()
 
 
@@ -91,6 +95,7 @@ def __process_img(img, stream: bool = False):
 
     test_image = cv2.resize(img, (640, 640))
 
+    model = current_app.config['YOLO_MODEL']
     results = model([test_image], stream=stream)
 
     for r in results:
@@ -102,7 +107,7 @@ def __process_img(img, stream: bool = False):
             conf = float(box.conf[0])
             cls = int(box.cls[0])
 
-            class_names = get_class_names()
+            class_names = current_app.config['CLASS_NAMES']
             label = f'{class_names[cls]} {conf:.2f}'
             annotator.box_label(box_coords, label, color=(232, 21, 21))
 

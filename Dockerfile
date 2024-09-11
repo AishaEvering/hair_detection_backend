@@ -28,7 +28,7 @@ COPY . .
 EXPOSE 8080
 
 # Run the Flask application with Gunicorn
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "wsgi:app"]
+CMD ["gunicorn", "--timeout", "500", "--threads","3", "-b", "0.0.0.0:8080", "wsgi:app"]
 
 LABEL maintainer="Aisha Evering"
 LABEL version="1.0"
