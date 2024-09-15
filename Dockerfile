@@ -3,7 +3,8 @@ FROM python:3.11-slim
 
 # Set environment variables
 ENV FLASK_APP=wsgi:app
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=True
+ENV PORT=8080
 
 # Set the working directory in the container
 WORKDIR /app
@@ -28,7 +29,7 @@ COPY . .
 EXPOSE 8080
 
 # Run the Flask application with Gunicorn
-CMD ["gunicorn", "--timeout", "500", "--threads","3", "-b", "0.0.0.0:8080", "wsgi:app"]
+CMD ["gunicorn", "--timeout", "800", "--threads","3", "-b", "0.0.0.0:8080", "wsgi:app"]
 
 LABEL maintainer="Aisha Evering"
 LABEL version="1.0"

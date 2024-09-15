@@ -15,7 +15,22 @@ logger = logging.getLogger(__name__)
 MAX_WAIT_TIME = 10
 
 
-@bp.route("/")
+@bp.errorhandler(404)
+def resource_not_found(e):
+    return jsonify(error=str(e)), 404
+
+
+@bp.errorhandler(405)
+def resource_not_found(e):
+    return jsonify(error=str(e)), 405
+
+
+@bp.errorhandler(401)
+def custom_401(error):
+    return Response("API Key required.", 401)
+
+
+@bp.route("/ping")
 def hello_world():
     return "<h1 style='color:green'>Hello World! Are we live?</h1>"
 
